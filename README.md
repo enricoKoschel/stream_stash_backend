@@ -1,6 +1,6 @@
 # Stream Stash backend
 
-The backend for the Stream Stash website
+The backend for the Stream Stash website, the GitHub repository for the frontend can be found [here](https://github.com/enricoKoschel/stream-stash)
 
 ## How to run locally
 
@@ -13,7 +13,3 @@ cargo run # debug build
 # or
 cargo run --release # production build with optimizations
 ```
-
----
-
-### The GitHub repository for the frontend can be found [here](https://github.com/enricoKoschel/stream-stash)
