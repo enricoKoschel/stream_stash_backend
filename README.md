@@ -1,6 +1,7 @@
 # Stream Stash backend
 
-The backend for the Stream Stash website, the GitHub repository for the frontend can be found [here](https://github.com/enricoKoschel/stream-stash)
+The backend for the Stream Stash website, the repository for the frontend can be
+found [here](https://github.com/enricoKoschel/stream-stash).
 
 ## How to run locally
 
