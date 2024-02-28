@@ -1,6 +1,4 @@
-mod test_router;
-
-use tide::prelude::*;
+mod db_router;
 
 macro_rules! param_struct {
     ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+) => {
@@ -43,10 +41,52 @@ async fn main() -> Result<(), std::io::Error> {
 
     server.with(cors);*/
 
-    server.at("/").get(|_| async move { Ok("/ route (root)") });
-    server.at("/test").nest(test_router::new());
+    server.with(tide::sessions::SessionMiddleware::new(
+        tide::sessions::MemoryStore::new(),
+        std::env::var("TIDE_SECRET")
+            .expect(
+                "Please provide a TIDE_SECRET value of at least 32 bytes in order to run this example",
+            )
+            .as_bytes(),
+    ));
 
-    server.listen("localhost:8080").await?;
+    server.at("/").get(|req: tide::Request<()>| async move {
+        let username: Option<String> = req.session().get("username");
+        println!(
+            "{:?} {:?} {:?}",
+            req.host(),
+            req.local_addr(),
+            req.peer_addr()
+        );
+
+        match username {
+            Some(username) => Ok(format!("you are logged in as '{}'", username)),
+            None => Ok("you are not logged in".to_string()),
+        }
+    });
+
+    server
+        .at("/login/:username")
+        .get(|mut req: tide::Request<()>| async move {
+            let username = req.param("username").unwrap().to_owned();
+            req.session_mut().insert("username", username).unwrap();
+
+            Ok(tide::Redirect::new("/"))
+        });
+
+    server
+        .at("/logout")
+        .get(|mut req: tide::Request<()>| async move {
+            req.session_mut().destroy();
+            Ok(tide::Redirect::new("/"))
+        });
+
+    server.at("/db").nest(db_router::new());
+
+    // TODO: In production have different routers for api.stream-stash.com and stream-stash.com
+    server
+        .listen(vec!["localhost:8080", "127.0.0.1:8080"])
+        .await?;
 
     Ok(())
 }
