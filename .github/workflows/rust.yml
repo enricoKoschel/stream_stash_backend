@@ -28,7 +28,6 @@ jobs:
         args: --release
       env:
         CARGO_TERM_COLOR: always
-        TIDE_SECRET: ${{ secrets.TIDE_SECRET }}
 
     - name: Upload to server
       uses: appleboy/scp-action@master
