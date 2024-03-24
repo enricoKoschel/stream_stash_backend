@@ -44,4 +44,4 @@ jobs:
         host: ${{ secrets.SERVER_HOST }}
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SERVER_SSH_KEY }}
-        script: "/home/${{ secrets.SERVER_USERNAME }}/run_backend.sh"
+        script: "/home/${{ secrets.SERVER_USERNAME }}/run_backend.sh &"
