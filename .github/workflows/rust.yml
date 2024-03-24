@@ -14,22 +14,22 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-	- name: Set up Rust
+    - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         override: true
 
-	- name: Build Rust
+    - name: Build Rust
       uses: actions-rs/cargo@v1
       with:
         command: build
         args: --release
       env:
         CARGO_TERM_COLOR: always
-		TIDE_SECRET: ${{ secrets.TIDE_SECRET }}
+        TIDE_SECRET: ${{ secrets.TIDE_SECRET }}
 
-	- name: Upload to server
+    - name: Upload to server
       uses: appleboy/scp-action@master
       with:
         host: ${{ secrets.SERVER_HOST }}
@@ -38,7 +38,7 @@ jobs:
         source: "target/release/stream_stash_backend"
         target: "/var/stream-stash-backend"
 
-	- name: Execute program
+    - name: Execute program
       uses: appleboy/ssh-action@master
       with:
         host: ${{ secrets.SERVER_HOST }}
