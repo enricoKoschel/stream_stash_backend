@@ -1,5 +1,3 @@
-mod db_router;
-
 macro_rules! param_struct {
     ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+) => {
         use crate::{Deserialize, Serialize};
@@ -30,38 +28,43 @@ pub(crate) use param_struct;
 async fn main() -> Result<(), std::io::Error> {
     let mut server = tide::new();
 
-    /*let cors = tide::security::CorsMiddleware::new()
+    let frontend_origin = if cfg!(debug_assertions) {
+        "http://localhost:9000"
+    } else {
+        "https://stream-stash.com"
+    };
+
+    let cors_middleware = tide::security::CorsMiddleware::new()
         .allow_methods(
             "GET, POST, OPTIONS"
                 .parse::<tide::http::headers::HeaderValue>()
                 .unwrap(),
         )
-        .allow_origin(tide::security::Origin::from("*"))
-        .allow_credentials(false);
+        .allow_origin(tide::security::Origin::from(frontend_origin))
+        .allow_credentials(true);
 
-    server.with(cors);*/
+    server.with(cors_middleware);
 
-    server.with(tide::sessions::SessionMiddleware::new(
-        tide::sessions::MemoryStore::new(),
+    let session_middleware = tide::sessions::SessionMiddleware::new(
+        tide::sessions::CookieStore::new(),
         std::env::var("TIDE_SECRET")
-            .expect(
-                "Please provide a TIDE_SECRET value of at least 32 bytes in order to run this example",
-            )
+            .expect("Please provide a TIDE_SECRET envvar of at least 32 bytes")
             .as_bytes(),
-    ));
+    )
+    // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
+    .with_secure(!cfg!(debug_assertions))
+    .with_same_site_policy(tide::http::cookies::SameSite::Strict)
+    // 2678400 seconds = 31 days
+    .with_session_ttl(Some(std::time::Duration::from_secs(2678400)));
+
+    server.with(session_middleware);
 
     server.at("/").get(|req: tide::Request<()>| async move {
         let username: Option<String> = req.session().get("username");
-        println!(
-            "{:?} {:?} {:?}",
-            req.host(),
-            req.local_addr(),
-            req.peer_addr()
-        );
 
         match username {
-            Some(username) => Ok(format!("you are logged in as '{}'", username)),
-            None => Ok("you are not logged in".to_string()),
+            Some(username) => Ok(format!("You are logged in as '{}'", username)),
+            None => Ok("You are not logged in".to_string()),
         }
     });
 
@@ -81,12 +84,7 @@ async fn main() -> Result<(), std::io::Error> {
             Ok(tide::Redirect::new("/"))
         });
 
-    server.at("/db").nest(db_router::new());
-
-    // TODO: In production have different routers for api.stream-stash.com and stream-stash.com
-    server
-        .listen(vec!["localhost:8080", "127.0.0.1:8080"])
-        .await?;
+    server.listen("localhost:8080").await?;
 
     Ok(())
 }
