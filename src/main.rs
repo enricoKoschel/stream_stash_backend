@@ -45,6 +45,12 @@ async fn main() -> Result<(), std::io::Error> {
 
     server.with(cors_middleware);
 
+    let cookie_domain = if cfg!(debug_assertions) {
+        "" // TODO: Set logical cookie domain when testing locally
+    } else {
+        "stream-stash.com"
+    };
+    
     let session_middleware = tide::sessions::SessionMiddleware::new(
         tide::sessions::CookieStore::new(),
         std::env::var("TIDE_SECRET")
@@ -54,6 +60,7 @@ async fn main() -> Result<(), std::io::Error> {
     // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
     .with_secure(!cfg!(debug_assertions))
     .with_same_site_policy(tide::http::cookies::SameSite::Strict)
+    .with_cookie_domain(cookie_domain)
     // 2678400 seconds = 31 days
     .with_session_ttl(Some(std::time::Duration::from_secs(2678400)));
 
