@@ -46,11 +46,11 @@ async fn main() -> Result<(), std::io::Error> {
     server.with(cors_middleware);
 
     let cookie_domain = if cfg!(debug_assertions) {
-        "" // TODO: Set logical cookie domain when testing locally
+        "localhost"
     } else {
         "stream-stash.com"
     };
-    
+
     let session_middleware = tide::sessions::SessionMiddleware::new(
         tide::sessions::CookieStore::new(),
         std::env::var("TIDE_SECRET")
