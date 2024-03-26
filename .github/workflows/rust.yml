@@ -34,7 +34,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "target/release/stream_stash_backend"
-          target: "/var/stream-stash-backend"
+          target: "/var/stream-stash-backend/backend"
 
       - name: Execute program
         uses: appleboy/ssh-action@master
