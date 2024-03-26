@@ -28,7 +28,7 @@ pub(crate) use param_struct;
 async fn main() -> Result<(), std::io::Error> {
     let mut server = tide::new();
 
-    let frontend_origin = if cfg!(debug_assertions) {
+    let frontend_url = if cfg!(debug_assertions) {
         "http://localhost:9000"
     } else {
         "https://stream-stash.com"
@@ -40,17 +40,17 @@ async fn main() -> Result<(), std::io::Error> {
                 .parse::<tide::http::headers::HeaderValue>()
                 .unwrap(),
         )
-        .allow_origin(tide::security::Origin::from(frontend_origin))
+        .allow_origin(tide::security::Origin::from(frontend_url))
         .allow_credentials(true);
 
     server.with(cors_middleware);
 
     let cookie_domain = if cfg!(debug_assertions) {
-        "" // TODO: Set logical cookie domain when testing locally
+        "localhost"
     } else {
         "stream-stash.com"
     };
-    
+
     let session_middleware = tide::sessions::SessionMiddleware::new(
         tide::sessions::CookieStore::new(),
         std::env::var("TIDE_SECRET")

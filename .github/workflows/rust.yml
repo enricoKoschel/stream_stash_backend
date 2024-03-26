@@ -3,8 +3,6 @@ name: Build & deploy
 on:
   push:
     branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
   workflow_dispatch:
 
 jobs:
@@ -13,35 +11,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
-    - name: Build Rust
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --release
-      env:
-        CARGO_TERM_COLOR: always
+      - name: Build Rust
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+        env:
+          CARGO_TERM_COLOR: always
 
-    - name: Upload to server
-      uses: appleboy/scp-action@master
-      with:
-        host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USERNAME }}
-        key: ${{ secrets.SERVER_SSH_KEY }}
-        source: "target/release/stream_stash_backend"
-        target: "/home/${{ secrets.SERVER_USERNAME }}/backend"
+      - name: Upload to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "target/release/stream_stash_backend"
+          target: "/var/stream-stash-backend"
 
-    - name: Execute program
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USERNAME }}
-        key: ${{ secrets.SERVER_SSH_KEY }}
-        script: "/home/${{ secrets.SERVER_USERNAME }}/run_backend.sh &"
+      - name: Execute program
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: "/var/stream-stash-backend/run.sh &"
