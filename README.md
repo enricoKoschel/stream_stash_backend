@@ -7,6 +7,10 @@ found [here](https://github.com/enricoKoschel/stream-stash).
 
 Run all the following commands in the root directory of the project
 
+### Set environment variable
+
+Set the `TIDE_SECRET` environment variable equal to a random string with a length of at least 32 bytes
+
 ### Build and run the app
 
 ```bash
