@@ -1,8 +1,8 @@
-macro_rules! param_struct {
-    ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+) => {
-        use crate::{Deserialize, Serialize};
+mod v1router;
 
-        #[derive(Deserialize, Serialize)]
+macro_rules! serde_struct {
+    ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+) => {
+        #[derive(serde::Deserialize, serde::Serialize, Debug)]
         #[serde(default)]
         struct $struct_name {
             $(
@@ -20,31 +20,40 @@ macro_rules! param_struct {
             }
         }
     };
+    ($struct_name:ident, $($field_name:ident: $field_type:ty),+) => {
+        #[derive(serde::Deserialize, serde::Serialize, Debug)]
+        struct $struct_name {
+            $(
+                $field_name: $field_type,
+            )*
+        }
+    };
 }
 
-pub(crate) use param_struct;
+pub(crate) use serde_struct;
 
-#[async_std::main]
-async fn main() -> Result<(), std::io::Error> {
-    let mut server = tide::new();
-
+fn setup_cors(server: &mut tide::Server<()>) {
     let frontend_url = if cfg!(debug_assertions) {
         "http://localhost:9000"
     } else {
         "https://stream-stash.com"
     };
 
+    let allowed_methods: tide::http::headers::HeaderValue =
+        "GET, POST, DELETE, OPTIONS".parse().unwrap();
+
+    let allowed_headers: tide::http::headers::HeaderValue = "content-type".parse().unwrap();
+
     let cors_middleware = tide::security::CorsMiddleware::new()
-        .allow_methods(
-            "GET, POST, OPTIONS"
-                .parse::<tide::http::headers::HeaderValue>()
-                .unwrap(),
-        )
+        .allow_methods(allowed_methods)
+        .allow_headers(allowed_headers)
         .allow_origin(tide::security::Origin::from(frontend_url))
         .allow_credentials(true);
 
     server.with(cors_middleware);
+}
 
+fn setup_sessions(server: &mut tide::Server<()>) {
     let cookie_domain = if cfg!(debug_assertions) {
         "localhost"
     } else {
@@ -65,31 +74,16 @@ async fn main() -> Result<(), std::io::Error> {
     .with_session_ttl(Some(std::time::Duration::from_secs(2678400)));
 
     server.with(session_middleware);
+}
 
-    server.at("/").get(|req: tide::Request<()>| async move {
-        let username: Option<String> = req.session().get("username");
+#[async_std::main]
+async fn main() -> Result<(), std::io::Error> {
+    let mut server = tide::new();
 
-        match username {
-            Some(username) => Ok(format!("You are logged in as '{}'", username)),
-            None => Ok("You are not logged in".to_string()),
-        }
-    });
+    setup_cors(&mut server);
+    setup_sessions(&mut server);
 
-    server
-        .at("/login/:username")
-        .get(|mut req: tide::Request<()>| async move {
-            let username = req.param("username").unwrap().to_owned();
-            req.session_mut().insert("username", username).unwrap();
-
-            Ok(tide::Redirect::new("/"))
-        });
-
-    server
-        .at("/logout")
-        .get(|mut req: tide::Request<()>| async move {
-            req.session_mut().destroy();
-            Ok(tide::Redirect::new("/"))
-        });
+    server.at("/v1").nest(v1router::new());
 
     server.listen("localhost:8080").await?;
 
