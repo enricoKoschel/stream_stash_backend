@@ -1,7 +1,7 @@
 mod v1router;
 
 macro_rules! serde_struct {
-    ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+) => {
+    ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+ $(,)?) => {
         #[derive(serde::Deserialize, serde::Serialize, Debug)]
         #[serde(default)]
         struct $struct_name {
@@ -20,7 +20,7 @@ macro_rules! serde_struct {
             }
         }
     };
-    ($struct_name:ident, $($field_name:ident: $field_type:ty),+) => {
+    ($struct_name:ident, $($field_name:ident: $field_type:ty),+ $(,)?) => {
         #[derive(serde::Deserialize, serde::Serialize, Debug)]
         struct $struct_name {
             $(
