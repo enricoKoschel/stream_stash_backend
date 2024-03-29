@@ -30,15 +30,22 @@ macro_rules! serde_struct {
     };
 }
 
+use log::LevelFilter;
 pub(crate) use serde_struct;
 
-fn setup_cors(server: &mut tide::Server<()>) {
-    let frontend_url = if cfg!(debug_assertions) {
-        "http://localhost:9000"
-    } else {
-        "https://stream-stash.com"
-    };
+const FRONTEND_URL: &str = if cfg!(debug_assertions) {
+    "http://localhost:9000"
+} else {
+    "https://stream-stash.com"
+};
 
+fn setup_cors<T>(server: &mut tide::Server<T>)
+where
+    T: Clone,
+    T: Send,
+    T: Sync,
+    T: 'static,
+{
     let allowed_methods: tide::http::headers::HeaderValue =
         "GET, POST, DELETE, OPTIONS".parse().unwrap();
 
@@ -47,13 +54,19 @@ fn setup_cors(server: &mut tide::Server<()>) {
     let cors_middleware = tide::security::CorsMiddleware::new()
         .allow_methods(allowed_methods)
         .allow_headers(allowed_headers)
-        .allow_origin(tide::security::Origin::from(frontend_url))
+        .allow_origin(tide::security::Origin::from(FRONTEND_URL))
         .allow_credentials(true);
 
     server.with(cors_middleware);
 }
 
-fn setup_sessions(server: &mut tide::Server<()>) {
+fn setup_sessions<T>(server: &mut tide::Server<T>)
+where
+    T: Clone,
+    T: Send,
+    T: Sync,
+    T: 'static,
+{
     let cookie_domain = if cfg!(debug_assertions) {
         "localhost"
     } else {
@@ -78,7 +91,12 @@ fn setup_sessions(server: &mut tide::Server<()>) {
 
 #[async_std::main]
 async fn main() -> Result<(), std::io::Error> {
+    env_logger::builder().filter_level(LevelFilter::Info).init();
+
     let mut server = tide::new();
+
+    // TODO: Make own better logging middleware
+    server.with(tide::log::LogMiddleware::new());
 
     setup_cors(&mut server);
     setup_sessions(&mut server);
