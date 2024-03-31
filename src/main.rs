@@ -38,16 +38,44 @@ struct Session {
 }
 
 #[async_trait]
-impl<'r> FromRequest<'r> for Session {
+impl<'a> FromRequest<'a> for Session {
     type Error = std::convert::Infallible;
 
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Session, Self::Error> {
+    async fn from_request(request: &'a Request<'_>) -> Outcome<Session, Self::Error> {
         request
             .cookies()
             .get_private("session")
             .and_then(|cookie| serde_json::from_str::<Session>(cookie.value()).ok())
             .or_forward(Status::Forbidden)
     }
+}
+
+fn session_cookie<'a>(session_string: Option<String>) -> Cookie<'a> {
+    let cookie_domain = if cfg!(debug_assertions) {
+        "localhost"
+    } else {
+        "stream-stash.com"
+    };
+
+    // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
+    let secure = !cfg!(debug_assertions);
+
+    // 2678400 seconds = 31 days
+    let expires = OffsetDateTime::now_utc() + Duration::from_secs(2678400);
+
+    let cookie_name = "session";
+    let cookie = match session_string {
+        Some(session_string) => Cookie::build((cookie_name, session_string)),
+        None => Cookie::build(cookie_name),
+    };
+
+    cookie
+        .domain(cookie_domain)
+        .secure(secure)
+        .same_site(SameSite::Strict)
+        .http_only(true)
+        .expires(expires)
+        .build()
 }
 
 #[get("/")]
@@ -69,32 +97,14 @@ fn login(jar: &CookieJar<'_>, username: String, age: u32) -> Result<Redirect, St
         return Err(Status::InternalServerError);
     };
 
-    let cookie_domain = if cfg!(debug_assertions) {
-        "localhost"
-    } else {
-        "stream-stash.com"
-    };
-
-    // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
-    let secure = !cfg!(debug_assertions);
-
-    // 2678400 seconds = 31 days
-    let expires = OffsetDateTime::now_utc() + Duration::from_secs(2678400);
-
-    let session_cookie = Cookie::build(("session", session_string))
-        .domain(cookie_domain)
-        .secure(secure)
-        .same_site(SameSite::Strict)
-        .http_only(true)
-        .expires(expires);
-    jar.add_private(session_cookie);
+    jar.add_private(session_cookie(Some(session_string)));
 
     Ok(Redirect::to("/"))
 }
 
 #[get("/logout")]
 fn logout(jar: &CookieJar<'_>) -> Redirect {
-    jar.remove_private("session");
+    jar.remove_private(session_cookie(None));
 
     Redirect::to("/")
 }
