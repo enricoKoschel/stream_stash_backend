@@ -7,9 +7,21 @@ found [here](https://github.com/enricoKoschel/stream-stash).
 
 Run all the following commands in the root directory of the project
 
-### Set environment variable
+### Create a Google Cloud application
 
-Set the `TIDE_SECRET` environment variable equal to a random string with a length of at least 32 bytes
+TODO
+
+### Setup environment variables
+
+- Set the `ROCKET_SECRET_KEY` environment variable with a random 256-bit base64 string.\
+  This can be done with openssl like so:
+
+```bash
+openssl rand -base64 32
+```
+
+- Set the `GOOGLE_CLIENT_ID` environment variable with your Google Cloud application's client id
+- Set the `GOOGLE_CLIENT_SECRET` environment variable with your Google Cloud application's client secret
 
 ### Build and run the app
 

@@ -1,5 +1,15 @@
 mod v1router;
 
+use rocket::fairing::Fairing;
+use rocket::http::{Cookie, CookieJar, SameSite, Status};
+use rocket::outcome::IntoOutcome;
+use rocket::request::{FromRequest, Outcome};
+use rocket::time::OffsetDateTime;
+use rocket::{async_trait, launch, Request};
+use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins, CorsOptions};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
 macro_rules! serde_struct {
     ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+ $(,)?) => {
         #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -30,7 +40,6 @@ macro_rules! serde_struct {
     };
 }
 
-use log::LevelFilter;
 pub(crate) use serde_struct;
 
 const FRONTEND_URL: &str = if cfg!(debug_assertions) {
@@ -39,71 +48,145 @@ const FRONTEND_URL: &str = if cfg!(debug_assertions) {
     "https://stream-stash.com"
 };
 
-fn setup_cors<T>(server: &mut tide::Server<T>)
-where
-    T: Clone,
-    T: Send,
-    T: Sync,
-    T: 'static,
-{
-    let allowed_methods: tide::http::headers::HeaderValue =
-        "GET, POST, DELETE, OPTIONS".parse().unwrap();
+const SESSION_COOKIE_NAME: &str = "session";
 
-    let allowed_headers: tide::http::headers::HeaderValue = "content-type".parse().unwrap();
+const SESSION_COOKIE_DOMAIN: &str = if cfg!(debug_assertions) {
+    "localhost"
+} else {
+    "stream-stash.com"
+};
 
-    let cors_middleware = tide::security::CorsMiddleware::new()
-        .allow_methods(allowed_methods)
-        .allow_headers(allowed_headers)
-        .allow_origin(tide::security::Origin::from(FRONTEND_URL))
-        .allow_credentials(true);
+const SESSION_COOKIE_PATH: &str = "/";
 
-    server.with(cors_middleware);
+// Disable secure cookie in development, some browsers don't support secure cookies on http://localhost
+const SESSION_COOKIE_SECURE: bool = !cfg!(debug_assertions);
+
+const SESSION_COOKIE_SAME_SITE: SameSite = SameSite::Strict;
+
+const SESSION_COOKIE_HTTP_ONLY: bool = true;
+
+fn session_cookie_expires() -> OffsetDateTime {
+    // 2678400 seconds = 31 days
+    OffsetDateTime::now_utc() + Duration::from_secs(2678400)
 }
 
-fn setup_sessions<T>(server: &mut tide::Server<T>)
-where
-    T: Clone,
-    T: Send,
-    T: Sync,
-    T: 'static,
-{
-    let cookie_domain = if cfg!(debug_assertions) {
-        "localhost"
-    } else {
-        "stream-stash.com"
+fn cors_fairing() -> impl Fairing {
+    let allowed_methods: AllowedMethods = ["Get", "Post", "Delete"]
+        .iter()
+        .map(|s| std::str::FromStr::from_str(s).unwrap())
+        .collect();
+    let allowed_headers = AllowedHeaders::some(&["content-type"]);
+    let allowed_origins = AllowedOrigins::some_exact(&[FRONTEND_URL]);
+
+    CorsOptions::default()
+        .allowed_methods(allowed_methods)
+        .allowed_headers(allowed_headers)
+        .allowed_origins(allowed_origins)
+        .allow_credentials(true)
+        .to_cors()
+        .unwrap()
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum Session {
+    LoggedIn(LoggedInSession),
+    TempCodeVerifier(TempCodeVerifierSession),
+}
+
+#[derive(Serialize, Deserialize)]
+struct LoggedInSession {
+    access_token: String,
+    refresh_token: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TempCodeVerifierSession {
+    code_verifier: String,
+}
+
+#[async_trait]
+impl<'a> FromRequest<'a> for LoggedInSession {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(request: &'a Request<'_>) -> Outcome<LoggedInSession, Self::Error> {
+        request
+            .cookies()
+            .get_private("session")
+            .and_then(|cookie| serde_json::from_str::<LoggedInSession>(cookie.value()).ok())
+            .or_forward(Status::Forbidden)
+    }
+}
+
+#[async_trait]
+impl<'a> FromRequest<'a> for TempCodeVerifierSession {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(
+        request: &'a Request<'_>,
+    ) -> Outcome<TempCodeVerifierSession, Self::Error> {
+        request
+            .cookies()
+            .get_private("session")
+            .and_then(|cookie| serde_json::from_str::<TempCodeVerifierSession>(cookie.value()).ok())
+            .or_forward(Status::Forbidden)
+    }
+}
+
+#[must_use]
+fn add_session_cookie(jar: &CookieJar, session: &Session) -> bool {
+    let Ok(session_string) = serde_json::to_string(session) else {
+        return false;
     };
 
-    let session_middleware = tide::sessions::SessionMiddleware::new(
-        tide::sessions::CookieStore::new(),
-        std::env::var("TIDE_SECRET")
-            .expect("Please provide a TIDE_SECRET envvar of at least 32 bytes")
-            .as_bytes(),
-    )
-    // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
-    .with_secure(!cfg!(debug_assertions))
-    .with_same_site_policy(tide::http::cookies::SameSite::Strict)
-    .with_cookie_domain(cookie_domain)
-    // 2678400 seconds = 31 days
-    .with_session_ttl(Some(std::time::Duration::from_secs(2678400)));
+    let cookie = Cookie::build((SESSION_COOKIE_NAME, session_string))
+        .domain(SESSION_COOKIE_DOMAIN)
+        .path(SESSION_COOKIE_PATH)
+        .secure(SESSION_COOKIE_SECURE)
+        .same_site(SESSION_COOKIE_SAME_SITE)
+        .http_only(SESSION_COOKIE_HTTP_ONLY)
+        .expires(session_cookie_expires())
+        .build();
 
-    server.with(session_middleware);
+    jar.add_private(cookie);
+
+    true
 }
 
-#[async_std::main]
-async fn main() -> Result<(), std::io::Error> {
-    env_logger::builder().filter_level(LevelFilter::Info).init();
+fn remove_session_cookie(jar: &CookieJar) {
+    let cookie = Cookie::build(SESSION_COOKIE_NAME)
+        .domain(SESSION_COOKIE_DOMAIN)
+        .path(SESSION_COOKIE_PATH)
+        .secure(SESSION_COOKIE_SECURE)
+        .same_site(SESSION_COOKIE_SAME_SITE)
+        .http_only(SESSION_COOKIE_HTTP_ONLY)
+        .removal()
+        .build();
 
-    let mut server = tide::new();
+    jar.remove_private(cookie);
+}
 
-    // TODO: Make own better logging middleware
-    server.with(tide::log::LogMiddleware::new());
+struct GoogleApplicationDetails {
+    client_id: String,
+    client_secret: String,
+}
 
-    setup_cors(&mut server);
-    setup_sessions(&mut server);
+#[launch]
+fn rocket() -> _ {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
 
-    server.at("/v1").nest(v1router::new());
+    let state = GoogleApplicationDetails {
+        client_id: std::env::var("GOOGLE_CLIENT_ID")
+            .expect("Please provide a GOOGLE_CLIENT_ID envvar"),
+        client_secret: std::env::var("GOOGLE_CLIENT_SECRET")
+            .expect("Please provide a GOOGLE_CLIENT_SECRET envvar"),
+    };
 
-    server.listen("localhost:8080").await?;
-
-    Ok(())
+    rocket::build()
+        .attach(cors_fairing())
+        .manage(state)
+        .manage(reqwest::Client::new())
+        .mount("/v1", v1router::routes())
 }

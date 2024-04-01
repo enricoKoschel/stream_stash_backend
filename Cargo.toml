@@ -6,11 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tide = { git = "https://github.com/http-rs/tide.git", rev = "b32f680", features = ["sessions"] }
 serde = { version = "1.0.193", features = ["derive"] }
-async-std = { version = "1.12.0", features = ["attributes"] }
+serde_json = "1.0.115"
+log = "0.4.21"
+env_logger = "0.11.3"
+rocket = { version = "0.5.0", features = ["secrets", "json"] }
+rocket_cors = "0.6.0"
 pkce = "0.2.0"
 const_format = "0.2.32"
-surf = "2.3.2"
-env_logger = "0.11.3"
-log = "0.4.21"
+reqwest = { version = "0.12.2", features = ["json"] }
+url = "2.5.0"
