@@ -1,16 +1,14 @@
-use crate::v1router::ApiError::{Forbidden, InternalServerError};
-use crate::{
-    add_session_cookie, remove_session_cookie, serde_struct, GoogleApplicationDetails,
-    LoggedInSession, Session, TempCodeVerifierSession, FRONTEND_URL,
+use crate::macros::{
+    add_session_cookie, forbidden, get_json_body, internal_server_error, log_error_location,
+    parse_url, serde_enum, serde_struct,
 };
+use crate::session::{remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession};
+use crate::{GoogleApplicationDetails, FRONTEND_URL};
 use const_format::concatcp;
 use rocket::http::{CookieJar, Status};
 use rocket::serde::json::Json;
 use rocket::{delete, get, post, Responder, State};
-use serde::Deserialize;
-use url::Url;
 
-// TODO: Add logging (everywhere ? is used, in impl from error traits)
 // TODO: Update readme
 
 const REDIRECT_URI: &str = concatcp!(FRONTEND_URL, "/loginRedirect");
@@ -23,18 +21,6 @@ enum ApiError {
     Forbidden(()),
     #[response(status = 500)]
     InternalServerError(()),
-}
-
-impl From<url::ParseError> for ApiError {
-    fn from(_: url::ParseError) -> Self {
-        InternalServerError(())
-    }
-}
-
-impl From<reqwest::Error> for ApiError {
-    fn from(_: reqwest::Error) -> Self {
-        InternalServerError(())
-    }
 }
 
 /*
@@ -58,41 +44,25 @@ fn google_login(
     let code_verifier = pkce::code_verifier(128);
     let code_challenge = pkce::code_challenge(&code_verifier);
 
-    let mut google_auth_url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")?;
+    let mut google_auth_url = parse_url!("https://accounts.google.com/o/oauth2/v2/auth");
     google_auth_url
         .query_pairs_mut()
-        .append_pair("client_id", &google_application_details.client_id);
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("redirect_uri", REDIRECT_URI);
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("response_type", "code");
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("prompt", "consent");
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("access_type", "offline");
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("scope", GOOGLE_SCOPE);
-    google_auth_url
-        .query_pairs_mut()
-        .append_pair("code_challenge", &code_challenge);
-    google_auth_url
-        .query_pairs_mut()
+        .append_pair("client_id", &google_application_details.client_id)
+        .append_pair("redirect_uri", REDIRECT_URI)
+        .append_pair("response_type", "code")
+        .append_pair("prompt", "consent")
+        .append_pair("access_type", "offline")
+        .append_pair("scope", GOOGLE_SCOPE)
+        .append_pair("code_challenge", &code_challenge)
         .append_pair("code_challenge_method", "S256");
 
     let code_verifier_string: String = code_verifier.iter().map(|n| *n as char).collect();
-    if !add_session_cookie(
+    add_session_cookie!(
         jar,
-        &Session::TempCodeVerifier(TempCodeVerifierSession {
+        Session::TempCodeVerifier(TempCodeVerifierSession {
             code_verifier: code_verifier_string,
-        }),
-    ) {
-        return Err(InternalServerError(()));
-    };
+        })
+    );
 
     Ok(Json(GoogleLoginResBody {
         google_auth_url: google_auth_url.to_string(),
@@ -139,32 +109,20 @@ async fn finish_login(
         error_description: String,
         error: String,
     );
+    serde_enum!(GoogleResponse, Ok(GoogleOkResponse), Err(GoogleErrResponse));
 
-    // TODO: Macro for this?
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum GoogleResponse {
-        Ok(GoogleOkResponse),
-        Err(GoogleErrResponse),
-    }
+    let token_url = parse_url!("https://oauth2.googleapis.com/token");
+    let request = http_client.post(token_url).json(&GoogleRequest {
+        client_id: google_application_details.client_id.clone(),
+        client_secret: google_application_details.client_secret.clone(),
+        code: req_body.code.clone(),
+        code_verifier: session.code_verifier,
+        grant_type: "authorization_code".to_string(),
+        redirect_uri: REDIRECT_URI.to_string(),
+    });
+    let response = get_json_body!(request, GoogleResponse);
 
-    let token_url = Url::parse("https://oauth2.googleapis.com/token")?;
-    let google_response: GoogleResponse = http_client
-        .post(token_url)
-        .json(&GoogleRequest {
-            client_id: google_application_details.client_id.clone(),
-            client_secret: google_application_details.client_secret.clone(),
-            code: req_body.code.clone(),
-            code_verifier: session.code_verifier,
-            grant_type: "authorization_code".to_string(),
-            redirect_uri: REDIRECT_URI.to_string(),
-        })
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    match google_response {
+    match response {
         GoogleResponse::Ok(GoogleOkResponse {
             access_token,
             scope,
@@ -178,31 +136,27 @@ async fn finish_login(
                 scope.split_whitespace().collect();
 
             if requested_scope != received_scope {
-                log::error!(
+                return Err(forbidden!(
                     "Scope returned by google ({scope}) not the same as requested ({GOOGLE_SCOPE})"
-                );
-                return Err(Forbidden(()));
+                ));
             }
 
-            if !add_session_cookie(
+            add_session_cookie!(
                 jar,
-                &Session::LoggedIn(LoggedInSession {
+                Session::LoggedIn(LoggedInSession {
                     access_token,
                     refresh_token,
-                }),
-            ) {
-                return Err(InternalServerError(()));
-            };
+                })
+            );
 
             Ok(Status::Ok)
         }
         GoogleResponse::Err(GoogleErrResponse {
             error_description,
             error,
-        }) => {
-            log::error!("Could not authenticate with google: {error} - {error_description}");
-            Err(Forbidden(()))
-        }
+        }) => Err(forbidden!(
+            "Could not authenticate with google: {error} - {error_description}"
+        )),
     }
 }
 
@@ -257,25 +211,15 @@ async fn user_info(
                 error_description: String,
                 error: String,
             );
+            serde_enum!(GoogleResponse, Ok(GoogleOkResponse), Err(GoogleErrResponse));
 
-            // TODO: Macro for this?
-            #[derive(Deserialize)]
-            #[serde(untagged)]
-            enum GoogleResponse {
-                Ok(GoogleOkResponse),
-                Err(GoogleErrResponse),
-            }
-
-            let api_url = Url::parse("https://www.googleapis.com/oauth2/v2/userinfo")?;
-            let google_response: GoogleResponse = http_client
+            let api_url = parse_url!("https://www.googleapis.com/oauth2/v2/userinfo");
+            let request = http_client
                 .get(api_url)
-                .header("authorization", format!("Bearer {}", session.access_token))
-                .send()
-                .await?
-                .json()
-                .await?;
+                .header("authorization", format!("Bearer {}", session.access_token));
+            let response = get_json_body!(request, GoogleResponse);
 
-            match google_response {
+            match response {
                 GoogleResponse::Ok(GoogleOkResponse {
                     locale: _locale,
                     given_name: _given_name,
@@ -289,10 +233,9 @@ async fn user_info(
                 GoogleResponse::Err(GoogleErrResponse {
                     error_description,
                     error,
-                }) => {
-                    log::error!("Could not get user information: {error} - {error_description}");
-                    Err(Forbidden(()))
-                }
+                }) => Err(forbidden!(
+                    "Could not get user information: {error} - {error_description}"
+                )),
             }
         }
         None => Ok(Json(UserInfoResBody {
