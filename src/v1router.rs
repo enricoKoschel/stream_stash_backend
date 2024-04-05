@@ -1,13 +1,15 @@
 use crate::macros::{
     add_session_cookie, forbidden, get_json_body, internal_server_error, log_error_location,
-    parse_url, serde_enum, serde_struct,
+    log_info_location, parse_url, refresh_google_login, serde_struct,
 };
 use crate::session::{remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession};
 use crate::{GoogleApplicationDetails, FRONTEND_URL};
 use const_format::concatcp;
 use rocket::http::{CookieJar, Status};
 use rocket::serde::json::Json;
+use rocket::time::OffsetDateTime;
 use rocket::{delete, get, post, Responder, State};
+use std::time::Duration;
 
 // TODO: Update readme
 
@@ -21,6 +23,12 @@ enum ApiError {
     Forbidden(()),
     #[response(status = 500)]
     InternalServerError(()),
+}
+
+fn expires_at(expires_in: u64) -> i64 {
+    const TOLERANCE: u64 = 100;
+
+    (OffsetDateTime::now_utc() + Duration::from_secs(expires_in - TOLERANCE)).unix_timestamp()
 }
 
 /*
@@ -98,18 +106,13 @@ async fn finish_login(
         grant_type: String,
         redirect_uri: String,
     );
-    serde_struct!(GoogleOkResponse,
+    serde_struct!(GoogleResponse,
         access_token:String,
         scope: String,
         token_type: String,
         expires_in: u64,
         refresh_token: String,
     );
-    serde_struct!(GoogleErrResponse,
-        error_description: String,
-        error: String,
-    );
-    serde_enum!(GoogleResponse, Ok(GoogleOkResponse), Err(GoogleErrResponse));
 
     let token_url = parse_url!("https://oauth2.googleapis.com/token");
     let request = http_client.post(token_url).json(&GoogleRequest {
@@ -123,11 +126,11 @@ async fn finish_login(
     let response = get_json_body!(request, GoogleResponse);
 
     match response {
-        GoogleResponse::Ok(GoogleOkResponse {
+        Ok(GoogleResponse {
             access_token,
             scope,
             token_type: _token_type,
-            expires_in: _expires_in,
+            expires_in,
             refresh_token,
         }) => {
             let requested_scope: std::collections::HashSet<&str> =
@@ -146,17 +149,88 @@ async fn finish_login(
                 Session::LoggedIn(LoggedInSession {
                     access_token,
                     refresh_token,
+                    expires_at: expires_at(expires_in),
                 })
             );
 
             Ok(Status::Ok)
         }
-        GoogleResponse::Err(GoogleErrResponse {
-            error_description,
-            error,
-        }) => Err(forbidden!(
-            "Could not authenticate with google: {error} - {error_description}"
-        )),
+        Err(err) => Err(forbidden!("Could not authenticate with Google: {err}")),
+    }
+}
+
+/*
+--- /v1/refreshLogin ---
+
+Request query: <empty>
+
+Request body: <empty>
+
+Response body: <empty>
+*/
+#[post("/refreshLogin")]
+async fn refresh_login(
+    jar: &CookieJar<'_>,
+    session: LoggedInSession,
+    google_application_details: &State<GoogleApplicationDetails>,
+    http_client: &State<reqwest::Client>,
+) -> Result<Status, ApiError> {
+    serde_struct!(GoogleRequest,
+        client_id: String,
+        client_secret: String,
+        grant_type: String,
+        refresh_token: String,
+    );
+    serde_struct!(GoogleResponse,
+        access_token:String,
+        scope: String,
+        token_type: String,
+        expires_in: u64,
+        id_token: String,
+    );
+
+    let token_url = parse_url!("https://oauth2.googleapis.com/token");
+    let request = http_client.post(token_url).json(&GoogleRequest {
+        client_id: google_application_details.client_id.clone(),
+        client_secret: google_application_details.client_secret.clone(),
+        grant_type: "refresh_token".to_string(),
+        refresh_token: session.refresh_token.clone(),
+    });
+    let response = get_json_body!(request, GoogleResponse);
+
+    match response {
+        Ok(GoogleResponse {
+            access_token,
+            scope,
+            token_type: _token_type,
+            expires_in,
+            id_token: _id_token,
+        }) => {
+            let requested_scope: std::collections::HashSet<&str> =
+                GOOGLE_SCOPE.split_whitespace().collect();
+            let received_scope: std::collections::HashSet<&str> =
+                scope.split_whitespace().collect();
+
+            if requested_scope != received_scope {
+                return Err(forbidden!(
+                    "Scope returned by google ({scope}) not the same as requested ({GOOGLE_SCOPE})"
+                ));
+            }
+
+            add_session_cookie!(
+                jar,
+                Session::LoggedIn(LoggedInSession {
+                    access_token,
+                    refresh_token: session.refresh_token,
+                    expires_at: expires_at(expires_in),
+                })
+            );
+
+            log_info_location!("Google login refreshed");
+
+            Ok(Status::Ok)
+        }
+        Err(err) => Err(forbidden!("Could not reauthenticate with Google: {err}")),
     }
 }
 
@@ -170,10 +244,34 @@ Request body: <empty>
 Response body: <empty>
 */
 #[delete("/logout")]
-async fn logout(jar: &CookieJar<'_>) -> Status {
-    remove_session_cookie(jar);
+async fn logout(
+    jar: &CookieJar<'_>,
+    session: LoggedInSession,
+    google_application_details: &State<GoogleApplicationDetails>,
+    http_client: &State<reqwest::Client>,
+) -> Result<Status, ApiError> {
+    refresh_google_login!(jar, session, google_application_details, http_client);
 
-    Status::Ok
+    // TODO: Check if Google Drive files remain after revoking
+    let mut revoke_url = parse_url!("https://oauth2.googleapis.com/revoke");
+    revoke_url
+        .query_pairs_mut()
+        .append_pair("token", &session.access_token);
+
+    let request = http_client.post(revoke_url);
+    // The response data sent by Google is irrelevant, only the status matters
+    let response = get_json_body!(request, serde_json::Value);
+
+    match response {
+        Ok(_) => {
+            remove_session_cookie(jar);
+
+            log_info_location!("Google login revoked");
+
+            Ok(Status::Ok)
+        }
+        Err(err) => Err(forbidden!("Could not revoke Google access: {err}")),
+    }
 }
 
 /*
@@ -192,26 +290,22 @@ serde_struct!(UserInfoResBody, logged_in: bool, username: Option<String>);
 
 #[get("/userInfo")]
 async fn user_info(
+    jar: &CookieJar<'_>,
     session: Option<LoggedInSession>,
+    google_application_details: &State<GoogleApplicationDetails>,
     http_client: &State<reqwest::Client>,
 ) -> Result<Json<UserInfoResBody>, ApiError> {
     match session {
         Some(session) => {
-            // TODO: Check for expired access_token
+            refresh_google_login!(jar, session, google_application_details, http_client);
 
-            serde_struct!(GoogleOkResponse,
+            serde_struct!(GoogleResponse,
                 locale: String,
                 given_name: String,
                 picture: String,
                 id: String,
                 name: String,
             );
-            // TODO: Check this
-            serde_struct!(GoogleErrResponse,
-                error_description: String,
-                error: String,
-            );
-            serde_enum!(GoogleResponse, Ok(GoogleOkResponse), Err(GoogleErrResponse));
 
             let api_url = parse_url!("https://www.googleapis.com/oauth2/v2/userinfo");
             let request = http_client
@@ -220,7 +314,7 @@ async fn user_info(
             let response = get_json_body!(request, GoogleResponse);
 
             match response {
-                GoogleResponse::Ok(GoogleOkResponse {
+                Ok(GoogleResponse {
                     locale: _locale,
                     given_name: _given_name,
                     picture: _picture,
@@ -230,11 +324,8 @@ async fn user_info(
                     logged_in: true,
                     username: Some(name),
                 })),
-                GoogleResponse::Err(GoogleErrResponse {
-                    error_description,
-                    error,
-                }) => Err(forbidden!(
-                    "Could not get user information: {error} - {error_description}"
+                Err(err) => Err(forbidden!(
+                    "Could not get user information from Google: {err}"
                 )),
             }
         }
@@ -246,5 +337,5 @@ async fn user_info(
 }
 
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![google_login, finish_login, logout, user_info]
+    rocket::routes![google_login, finish_login, refresh_login, logout, user_info]
 }

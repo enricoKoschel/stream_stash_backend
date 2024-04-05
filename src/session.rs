@@ -1,3 +1,4 @@
+use crate::macros::log_error_location;
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::{Deserialize, Serialize};
@@ -27,22 +28,23 @@ fn cookie_expires() -> OffsetDateTime {
     OffsetDateTime::now_utc() + Duration::from_secs(2678400)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum Session {
     LoggedIn(LoggedInSession),
     TempCodeVerifier(TempCodeVerifierSession),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LoggedInSession {
-    pub(crate) access_token: String,
-    pub(crate) refresh_token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TempCodeVerifierSession {
-    pub(crate) code_verifier: String,
+    pub code_verifier: String,
 }
 
 #[async_trait]
@@ -57,7 +59,7 @@ impl<'a> FromRequest<'a> for LoggedInSession {
         match serde_json::from_str::<LoggedInSession>(session_cookie.value()) {
             Ok(logged_in_session) => Outcome::Success(logged_in_session),
             Err(err) => {
-                log::error!(
+                log_error_location!(
                     "Trying to access {}, could not parse LoggedInSession from session cookie: {}",
                     request.uri().path(),
                     err
@@ -82,8 +84,8 @@ impl<'a> FromRequest<'a> for TempCodeVerifierSession {
         match serde_json::from_str::<TempCodeVerifierSession>(session_cookie.value()) {
             Ok(temp_code_verifier_session) => Outcome::Success(temp_code_verifier_session),
             Err(err) => {
-                log::error!(
-                    "Trying to access {}, could not parse TempCodeVerifier from session cookie: {}",
+                log_error_location!(
+                    "Trying to access {}, could not parse TempCodeVerifierSession from session cookie: {}",
                     request.uri().path(),
                     err
                 );
@@ -97,7 +99,7 @@ fn get_session_cookie<'a>(request: &'a Request) -> Option<Cookie<'a>> {
     match request.cookies().get_private(COOKIE_NAME) {
         Some(cookie) => Some(cookie),
         None => {
-            log::error!(
+            log_error_location!(
                 "Trying to access {}, could not get session cookie",
                 request.uri().path()
             );
@@ -108,8 +110,12 @@ fn get_session_cookie<'a>(request: &'a Request) -> Option<Cookie<'a>> {
 
 #[must_use]
 pub fn add_session_cookie(jar: &CookieJar, session: &Session) -> bool {
-    let Ok(session_string) = serde_json::to_string(session) else {
-        return false;
+    let session_string = match serde_json::to_string(session) {
+        Ok(session_string) => session_string,
+        Err(err) => {
+            log_error_location!("JSON serialize error: {err}");
+            return false;
+        }
     };
 
     let cookie = Cookie::build((COOKIE_NAME, session_string))

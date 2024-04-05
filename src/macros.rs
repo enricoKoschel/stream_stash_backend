@@ -28,22 +28,17 @@ macro_rules! serde_struct {
     };
 }
 
-macro_rules! serde_enum {
-    ($enum_name:ident, $($variant_name:ident($variant_type:ty)),+ $(,)?) => {
-        #[derive(serde::Deserialize, serde::Serialize, Debug)]
-        #[serde(untagged)]
-        enum $enum_name {
-            $(
-                $variant_name($variant_type),
-            )+
-        }
-    };
-}
-
 macro_rules! log_error_location {
     ($($arg:tt)+) => {
         let msg = format!($($arg)+);
         log::error!("({}:{}) {}", line!(), column!(), msg);
+    };
+}
+
+macro_rules! log_info_location {
+    ($($arg:tt)+) => {
+        let msg = format!($($arg)+);
+        log::info!("({}:{}) {}", line!(), column!(), msg);
     };
 }
 
@@ -77,9 +72,17 @@ macro_rules! get_json_body {
             Err(err) => return Err(internal_server_error!("Reqwest error: {}", err)),
         };
 
-        match response.json::<$ty>().await {
+        let json = match response.json::<serde_json::Value>().await {
             Ok(json) => json,
             Err(err) => return Err(internal_server_error!("JSON deserialize error: {}", err)),
+        };
+
+        match serde_json::from_value::<$ty>(json.clone()) {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                log_error_location!("JSON parse error: {}", err);
+                Err(json)
+            }
         }
     }};
 }
@@ -92,7 +95,21 @@ macro_rules! add_session_cookie {
     };
 }
 
+macro_rules! refresh_google_login {
+    ($jar:expr, $session:expr, $google_application_details:expr, $http_client:expr) => {
+        if OffsetDateTime::now_utc().unix_timestamp() >= $session.expires_at {
+            crate::v1router::refresh_login(
+                $jar,
+                $session.clone(),
+                $google_application_details,
+                $http_client,
+            )
+            .await?;
+        }
+    };
+}
+
 pub(crate) use {
     add_session_cookie, forbidden, get_json_body, internal_server_error, log_error_location,
-    parse_url, serde_enum, serde_struct,
+    log_info_location, parse_url, refresh_google_login, serde_struct,
 };
