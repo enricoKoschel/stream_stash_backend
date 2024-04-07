@@ -45,14 +45,14 @@ macro_rules! log_info_location {
 macro_rules! forbidden {
     ($($arg:tt)+) => {{
         log_error_location!($($arg)+);
-        ApiError::Forbidden(())
+        crate::v1router::ApiError::Forbidden(())
     }};
 }
 
 macro_rules! internal_server_error {
     ($($arg:tt)+) => {{
         log_error_location!($($arg)+);
-        ApiError::InternalServerError(())
+        crate::v1router::ApiError::InternalServerError(())
     }};
 }
 
@@ -95,21 +95,7 @@ macro_rules! add_session_cookie {
     };
 }
 
-macro_rules! refresh_google_login {
-    ($jar:expr, $session:expr, $google_application_details:expr, $http_client:expr) => {
-        if OffsetDateTime::now_utc().unix_timestamp() >= $session.expires_at {
-            crate::v1router::refresh_login(
-                $jar,
-                $session.clone(),
-                $google_application_details,
-                $http_client,
-            )
-            .await?;
-        }
-    };
-}
-
 pub(crate) use {
     add_session_cookie, forbidden, get_json_body, internal_server_error, log_error_location,
-    log_info_location, parse_url, refresh_google_login, serde_struct,
+    log_info_location, parse_url, serde_struct,
 };
