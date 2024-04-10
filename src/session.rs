@@ -149,9 +149,9 @@ async fn refresh_google_login(
         Ok(GoogleResponse {
             access_token,
             scope,
-            token_type: _token_type,
+            token_type: _,
             expires_in,
-            id_token: _id_token,
+            id_token: _,
         }) => {
             let requested_scope: std::collections::HashSet<&str> =
                 GOOGLE_SCOPE.split_whitespace().collect();
@@ -160,7 +160,7 @@ async fn refresh_google_login(
 
             if requested_scope != received_scope {
                 return Err(forbidden!(
-                    "Scope returned by google ({scope}) not the same as requested ({GOOGLE_SCOPE})"
+                    "Scope returned by google ({received_scope:#?}) not the same as requested ({requested_scope:#?})"
                 ));
             }
 

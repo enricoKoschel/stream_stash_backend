@@ -13,7 +13,7 @@ use rocket::{delete, get, post, Responder, State};
 
 const REDIRECT_URI: &str = concatcp!(FRONTEND_URL, "/loginRedirect");
 pub(crate) const GOOGLE_SCOPE: &str =
-    "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.profile";
+    "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email openid";
 
 #[derive(Responder)]
 pub(crate) enum ApiError {
@@ -121,7 +121,7 @@ async fn finish_login(
         Ok(GoogleResponse {
             access_token,
             scope,
-            token_type: _token_type,
+            token_type: _,
             expires_in,
             refresh_token,
         }) => {
@@ -132,7 +132,7 @@ async fn finish_login(
 
             if requested_scope != received_scope {
                 return Err(forbidden!(
-                    "Scope returned by google ({scope}) not the same as requested ({GOOGLE_SCOPE})"
+                    "Scope returned by google ({received_scope:#?}) not the same as requested ({requested_scope:#?})"
                 ));
             }
 
@@ -197,10 +197,10 @@ Request body: <empty>
 
 Response body: {
     logged_in: bool,
-    username: String,
+    email: String,
 }
 */
-serde_struct!(UserInfoResBody, logged_in: bool, username: Option<String>);
+serde_struct!(UserInfoResBody, logged_in: bool, email: Option<String>);
 
 #[get("/userInfo")]
 async fn user_info(
@@ -210,11 +210,10 @@ async fn user_info(
     match session {
         Some(session) => {
             serde_struct!(GoogleResponse,
-                locale: String,
-                given_name: String,
                 picture: String,
                 id: String,
-                name: String,
+                email: String,
+                verified_email: bool,
             );
 
             let api_url = parse_url!("https://www.googleapis.com/oauth2/v2/userinfo");
@@ -225,14 +224,13 @@ async fn user_info(
 
             match response {
                 Ok(GoogleResponse {
-                    locale: _locale,
-                    given_name: _given_name,
-                    picture: _picture,
-                    id: _id,
-                    name,
+                    picture: _,
+                    id: _,
+                    email,
+                    verified_email: _,
                 }) => Ok(Json(UserInfoResBody {
                     logged_in: true,
-                    username: Some(name),
+                    email: Some(email),
                 })),
                 Err(err) => Err(forbidden!(
                     "Could not get user information from Google: {err}"
@@ -241,7 +239,7 @@ async fn user_info(
         }
         None => Ok(Json(UserInfoResBody {
             logged_in: false,
-            username: None,
+            email: None,
         })),
     }
 }
