@@ -1,12 +1,10 @@
+mod macros;
+mod session;
+mod v1router;
+
 use rocket::fairing::Fairing;
-use rocket::http::{Cookie, CookieJar, SameSite, Status};
-use rocket::outcome::IntoOutcome;
-use rocket::request::{FromRequest, Outcome};
-use rocket::response::Redirect;
-use rocket::time::OffsetDateTime;
-use rocket::{async_trait, get, launch, routes, Request};
+use rocket::launch;
 use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins, CorsOptions};
-use std::time::Duration;
 
 const FRONTEND_URL: &str = if cfg!(debug_assertions) {
     "http://localhost:9000"
@@ -31,82 +29,9 @@ fn cors_fairing() -> impl Fairing {
         .unwrap()
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Session {
-    username: String,
-    age: u32,
-}
-
-#[async_trait]
-impl<'a> FromRequest<'a> for Session {
-    type Error = std::convert::Infallible;
-
-    async fn from_request(request: &'a Request<'_>) -> Outcome<Session, Self::Error> {
-        request
-            .cookies()
-            .get_private("session")
-            .and_then(|cookie| serde_json::from_str::<Session>(cookie.value()).ok())
-            .or_forward(Status::Forbidden)
-    }
-}
-
-fn session_cookie<'a>(session_string: Option<String>) -> Cookie<'a> {
-    let cookie_domain = if cfg!(debug_assertions) {
-        "localhost"
-    } else {
-        "stream-stash.com"
-    };
-
-    // Disable secure cookies in development, some browsers don't support secure cookies on http://localhost
-    let secure = !cfg!(debug_assertions);
-
-    // 2678400 seconds = 31 days
-    let expires = OffsetDateTime::now_utc() + Duration::from_secs(2678400);
-
-    let cookie_name = "session";
-    let cookie = match session_string {
-        Some(session_string) => Cookie::build((cookie_name, session_string)),
-        None => Cookie::build(cookie_name),
-    };
-
-    cookie
-        .domain(cookie_domain)
-        .secure(secure)
-        .same_site(SameSite::Strict)
-        .http_only(true)
-        .expires(expires)
-        .build()
-}
-
-#[get("/")]
-fn index(session: Option<Session>) -> String {
-    match session {
-        Some(session) => {
-            format!(
-                "You are logged in as {}, {} year(s) old",
-                session.username, session.age
-            )
-        }
-        None => "You are not logged in".to_string(),
-    }
-}
-
-#[get("/login/<username>/<age>")]
-fn login(jar: &CookieJar<'_>, username: String, age: u32) -> Result<Redirect, Status> {
-    let Ok(session_string) = serde_json::to_string(&Session { username, age }) else {
-        return Err(Status::InternalServerError);
-    };
-
-    jar.add_private(session_cookie(Some(session_string)));
-
-    Ok(Redirect::to("/"))
-}
-
-#[get("/logout")]
-fn logout(jar: &CookieJar<'_>) -> Redirect {
-    jar.remove_private(session_cookie(None));
-
-    Redirect::to("/")
+struct GoogleApplicationDetails {
+    client_id: String,
+    client_secret: String,
 }
 
 #[launch]
@@ -115,7 +40,16 @@ fn rocket() -> _ {
         .filter_level(log::LevelFilter::Info)
         .init();
 
+    let google_application_details = GoogleApplicationDetails {
+        client_id: std::env::var("GOOGLE_CLIENT_ID")
+            .expect("Please provide a GOOGLE_CLIENT_ID envvar"),
+        client_secret: std::env::var("GOOGLE_CLIENT_SECRET")
+            .expect("Please provide a GOOGLE_CLIENT_SECRET envvar"),
+    };
+
     rocket::build()
         .attach(cors_fairing())
-        .mount("/", routes![index, login, logout])
+        .manage(google_application_details)
+        .manage(reqwest::Client::new())
+        .mount("/v1", v1router::routes())
 }
