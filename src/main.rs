@@ -6,10 +6,10 @@ use rocket::fairing::Fairing;
 use rocket::launch;
 use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins, CorsOptions};
 
-const FRONTEND_URL: &str = if cfg!(debug_assertions) {
-    "http://localhost:9000"
+const FRONTEND_URLS: &[&str] = if cfg!(debug_assertions) {
+    &["http://www.localhost:9000", "http://localhost:9000"]
 } else {
-    "https://stream-stash.com"
+    &["https://stream-stash.com"]
 };
 
 fn cors_fairing() -> impl Fairing {
@@ -18,7 +18,7 @@ fn cors_fairing() -> impl Fairing {
         .map(|s| std::str::FromStr::from_str(s).unwrap())
         .collect();
     let allowed_headers = AllowedHeaders::some(&["content-type"]);
-    let allowed_origins = AllowedOrigins::some_exact(&[FRONTEND_URL]);
+    let allowed_origins = AllowedOrigins::some_exact(FRONTEND_URLS);
 
     CorsOptions::default()
         .allowed_methods(allowed_methods)
