@@ -5,13 +5,13 @@ use crate::macros::{
 use crate::session::{
     expires_at, remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession,
 };
-use crate::{GoogleApplicationDetails, FRONTEND_URL};
+use crate::{GoogleApplicationDetails, FRONTEND_URLS};
 use const_format::concatcp;
 use rocket::http::{CookieJar, Status};
 use rocket::serde::json::Json;
 use rocket::{delete, get, post, Responder, State};
 
-const REDIRECT_URI: &str = concatcp!(FRONTEND_URL, "/loginRedirect");
+const REDIRECT_URI: &str = concatcp!(FRONTEND_URLS[0], "/loginRedirect");
 pub(crate) const GOOGLE_SCOPE: &str =
     "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email openid";
 
