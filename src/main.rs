@@ -7,9 +7,9 @@ use rocket::launch;
 use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins, CorsOptions};
 
 const FRONTEND_URLS: &[&str] = if cfg!(debug_assertions) {
-    &["http://www.localhost:9000", "http://localhost:9000"]
+    &["http://localhost:9000"]
 } else {
-    &["https://stream-stash.com"]
+    &["https://www.stream-stash.com", "https://stream-stash.com"]
 };
 
 fn cors_fairing() -> impl Fairing {
