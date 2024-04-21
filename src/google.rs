@@ -25,7 +25,7 @@ fn compare_scope(scope: String) -> bool {
     if requested_scope == received_scope {
         true
     } else {
-        log_error_location!("Scope returned by google ({received_scope:#?}) not the same as requested ({requested_scope:#?})");
+        log_error_location!("Scope returned by google\n({received_scope:#?})\nnot the same as requested\n({requested_scope:#?})");
         false
     }
 }
