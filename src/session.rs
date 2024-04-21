@@ -1,9 +1,5 @@
-use crate::macros::{
-    add_session_cookie, forbidden, get_json_body, internal_server_error, log_error_location,
-    log_info_location, parse_url, serde_struct,
-};
-use crate::v1router::GOOGLE_SCOPE;
-use crate::GoogleApplicationDetails;
+use crate::google::{create_refreshed_session, ApplicationDetails};
+use crate::macros::{add_session_cookie, log_error_location};
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::{Deserialize, Serialize};
@@ -64,10 +60,29 @@ impl<'a> FromRequest<'a> for LoggedInSession {
         match serde_json::from_str::<LoggedInSession>(session_cookie.value()) {
             Ok(logged_in_session) => {
                 if OffsetDateTime::now_utc().unix_timestamp() >= logged_in_session.expires_at {
-                    match refresh_google_login(request, logged_in_session.refresh_token).await {
-                        Ok(session) => Outcome::Success(session),
-                        Err(_) => {
-                            log_error_location!("Could not refresh Google login");
+                    let jar = request.cookies();
+                    let rocket = request.rocket();
+                    let google_application_details = rocket.state::<ApplicationDetails>().unwrap();
+                    let http_client = rocket.state::<reqwest::Client>().unwrap();
+
+                    match create_refreshed_session(
+                        google_application_details,
+                        http_client,
+                        logged_in_session.refresh_token,
+                    )
+                    .await
+                    {
+                        Ok(session) => {
+                            match add_session_cookie!(jar, &Session::LoggedIn(session.clone())) {
+                                Ok(()) => Outcome::Success(session),
+                                Err(err) => {
+                                    log::error!("{err}");
+                                    Outcome::Forward(Status::Forbidden)
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            log_error_location!("Could not refresh Google login: {err}");
 
                             Outcome::Forward(Status::Forbidden)
                         }
@@ -77,11 +92,7 @@ impl<'a> FromRequest<'a> for LoggedInSession {
                 }
             }
             Err(err) => {
-                log_error_location!(
-                    "Trying to access {}, could not parse LoggedInSession from session cookie: {}",
-                    request.uri().path(),
-                    err
-                );
+                log_error_location!("Could not parse LoggedInSession from session cookie: {err}");
                 return Outcome::Forward(Status::Forbidden);
             }
         }
@@ -103,9 +114,7 @@ impl<'a> FromRequest<'a> for TempCodeVerifierSession {
             Ok(temp_code_verifier_session) => Outcome::Success(temp_code_verifier_session),
             Err(err) => {
                 log_error_location!(
-                    "Trying to access {}, could not parse TempCodeVerifierSession from session cookie: {}",
-                    request.uri().path(),
-                    err
+                    "Could not parse TempCodeVerifierSession from session cookie: {err}"
                 );
                 return Outcome::Forward(Status::Forbidden);
             }
@@ -113,81 +122,11 @@ impl<'a> FromRequest<'a> for TempCodeVerifierSession {
     }
 }
 
-async fn refresh_google_login(
-    request: &Request<'_>,
-    refresh_token: String,
-) -> Result<LoggedInSession, crate::v1router::ApiError> {
-    let rocket = request.rocket();
-    let jar = request.cookies();
-    let google_application_details = rocket.state::<GoogleApplicationDetails>().unwrap();
-    let http_client = rocket.state::<reqwest::Client>().unwrap();
-
-    serde_struct!(GoogleRequest,
-        client_id: String,
-        client_secret: String,
-        grant_type: String,
-        refresh_token: String,
-    );
-    serde_struct!(GoogleResponse,
-        access_token:String,
-        scope: String,
-        token_type: String,
-        expires_in: u64,
-        id_token: String,
-    );
-
-    let token_url = parse_url!("https://oauth2.googleapis.com/token");
-    let request = http_client.post(token_url).json(&GoogleRequest {
-        client_id: google_application_details.client_id.clone(),
-        client_secret: google_application_details.client_secret.clone(),
-        grant_type: "refresh_token".to_string(),
-        refresh_token: refresh_token.clone(),
-    });
-    let response = get_json_body!(request, GoogleResponse);
-
-    match response {
-        Ok(GoogleResponse {
-            access_token,
-            scope,
-            token_type: _,
-            expires_in,
-            id_token: _,
-        }) => {
-            let requested_scope: std::collections::HashSet<&str> =
-                GOOGLE_SCOPE.split_whitespace().collect();
-            let received_scope: std::collections::HashSet<&str> =
-                scope.split_whitespace().collect();
-
-            if requested_scope != received_scope {
-                return Err(forbidden!(
-                    "Scope returned by google ({received_scope:#?}) not the same as requested ({requested_scope:#?})"
-                ));
-            }
-
-            let refreshed_session = LoggedInSession {
-                access_token,
-                refresh_token,
-                expires_at: expires_at(expires_in),
-            };
-
-            add_session_cookie!(jar, Session::LoggedIn(refreshed_session.clone()));
-
-            log_info_location!("Google login refreshed");
-
-            Ok(refreshed_session)
-        }
-        Err(err) => Err(forbidden!("Could not reauthenticate with Google: {err}")),
-    }
-}
-
 fn get_session_cookie<'a>(request: &'a Request) -> Option<Cookie<'a>> {
     match request.cookies().get_private(COOKIE_NAME) {
         Some(cookie) => Some(cookie),
         None => {
-            log_error_location!(
-                "Trying to access {}, could not get session cookie",
-                request.uri().path()
-            );
+            log_error_location!("Could not get session cookie");
             None
         }
     }
@@ -228,10 +167,4 @@ pub fn remove_session_cookie(jar: &CookieJar) {
         .build();
 
     jar.remove_private(cookie);
-}
-
-pub fn expires_at(expires_in: u64) -> i64 {
-    const TOLERANCE: u64 = 100;
-
-    (OffsetDateTime::now_utc() + Duration::from_secs(expires_in - TOLERANCE)).unix_timestamp()
 }
