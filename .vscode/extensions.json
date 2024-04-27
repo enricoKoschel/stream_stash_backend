@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "gruntfuggly.todo-tree",
+    "vscode-icons-team.vscode-icons",
+    "eamodio.gitlens"
+  ]
+}
