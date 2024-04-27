@@ -84,7 +84,7 @@ macro_rules! get_json_body {
 }
 
 macro_rules! get_text_body {
-    ($req:expr, $ty:ty) => {
+    ($req:expr) => {
         'block: {
             let response = match $req.send().await {
                 Ok(response) => response,

@@ -319,7 +319,7 @@ pub async fn get_db_file_contents(
     ))?;
     api_url.query_pairs_mut().append_pair("alt", "media");
     let request = http_client.get(api_url).bearer_auth(&session.access_token);
-    let response = get_text_body!(request, serde_json::Value)?;
+    let response = get_text_body!(request)?;
 
     Ok(response)
 }
