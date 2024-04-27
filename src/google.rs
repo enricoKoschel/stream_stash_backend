@@ -1,17 +1,19 @@
-use url::Url;
-
 use crate::{
     expires_at,
     macros::{
-        compare_scope, forbidden, get_json_body, log_error_location, parse_url, serde_struct,
+        compare_scope, forbidden, get_json_body, get_text_body, log_error_location, parse_url,
+        serde_struct,
     },
     session::LoggedInSession,
     ApiResult,
 };
+use url::Url;
 
 //TODO: Only request one scope at a time or send back response with header "returned google scopes not the same as requested" and show corresponding error in frontend
 pub const AUTH_SCOPE: &str =
     "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email openid";
+
+const DB_FILE_NAME: &str = "db.json";
 
 pub struct ApplicationDetails {
     pub client_id: String,
@@ -134,11 +136,10 @@ pub async fn get_user_email(
     );
 
     let api_url = parse_url!("https://www.googleapis.com/oauth2/v2/userinfo")?;
-    let request = http_client
-        .get(api_url)
-        .header("authorization", format!("Bearer {}", session.access_token)); // TODO: add function to RequestBuild which adds the authorization header
+    let request = http_client.get(api_url).bearer_auth(&session.access_token);
     let response = get_json_body!(request, GoogleResponse)?;
 
+    // TODO: Only log in when E-Mail is verified
     match response {
         Ok(GoogleResponse {
             picture: _,
@@ -200,4 +201,125 @@ pub async fn create_refreshed_session(
         }
         Err(err) => Err(forbidden!("Could not reauthenticate with Google: {err}")),
     }
+}
+
+// Only includes the used fields, Google returns many more
+serde_struct!(pub File,
+    id: String,
+    name: String,
+    mimeType: String,
+);
+
+async fn create_db_file(
+    http_client: &reqwest::Client,
+    session: &LoggedInSession,
+) -> ApiResult<File> {
+    serde_struct!(FileMetadata, name: String, parents: Vec<String>);
+
+    let api_url = parse_url!("https://www.googleapis.com/drive/v3/files")?;
+    let request = http_client
+        .post(api_url)
+        .bearer_auth(&session.access_token)
+        .json(&FileMetadata {
+            name: DB_FILE_NAME.to_string(),
+            parents: vec!["appDataFolder".to_string()],
+        });
+    let response = get_json_body!(request, File)?;
+
+    match response {
+        Ok(file) => {
+            update_db_file(http_client, session, "{}", &file.id).await?;
+
+            Ok(file)
+        }
+        Err(err) => Err(forbidden!("Could not create file in Google Drive: {err}")),
+    }
+}
+
+async fn get_db_file(http_client: &reqwest::Client, session: &LoggedInSession) -> ApiResult<File> {
+    serde_struct!(GoogleResponse,
+        incompleteSearch: bool,
+        files: Vec<File>,
+        kind: String,
+        nextPageToken: Option<String>,
+    );
+
+    let mut api_url = parse_url!("https://www.googleapis.com/drive/v3/files")?;
+    api_url
+        .query_pairs_mut()
+        .append_pair("spaces", "appDataFolder")
+        .append_pair("q", &format!("name = '{DB_FILE_NAME}'"));
+    let request = http_client.get(api_url).bearer_auth(&session.access_token);
+    let response = get_json_body!(request, GoogleResponse)?;
+
+    match response {
+        Ok(GoogleResponse {
+            incompleteSearch: _,
+            files,
+            kind: _,
+            nextPageToken: _,
+        }) => Ok(if files.is_empty() {
+            create_db_file(http_client, session).await?
+        } else {
+            files[0].clone()
+        }),
+        Err(err) => Err(forbidden!("Could not list files in Google Drive: {err}")),
+    }
+}
+
+async fn update_db_file(
+    http_client: &reqwest::Client,
+    session: &LoggedInSession,
+    contents: &str,
+    id: &str,
+) -> ApiResult<()> {
+    let mut api_url = parse_url!(format!(
+        "https://www.googleapis.com/upload/drive/v3/files/{}",
+        id
+    ))?;
+    api_url.query_pairs_mut().append_pair("uploadType", "media");
+    let request = http_client
+        .patch(api_url)
+        .bearer_auth(&session.access_token)
+        .json(contents);
+    let response = get_json_body!(request, File);
+
+    match response {
+        Ok(_) => Ok(()),
+        Err(err) => Err(forbidden!("Could not update file in Google Drive: {err}")),
+    }
+}
+
+pub async fn get_and_update_db_file(
+    http_client: &reqwest::Client,
+    session: &LoggedInSession,
+    contents: &str,
+) -> ApiResult<()> {
+    let db_file = get_db_file(http_client, session).await?;
+
+    update_db_file(http_client, session, contents, &db_file.id).await
+}
+
+pub async fn get_db_file_contents(
+    http_client: &reqwest::Client,
+    session: &LoggedInSession,
+) -> ApiResult<String> {
+    serde_struct!(GoogleResponse,
+        incompleteSearch: bool,
+        files: Vec<File>,
+        kind: String,
+        nextPageToken: Option<String>,
+    );
+
+    let db_file = get_db_file(http_client, session).await?;
+
+    let mut api_url = parse_url!(format!(
+        "https://www.googleapis.com/drive/v3/files/{}",
+        db_file.id
+    ))?;
+    api_url.query_pairs_mut().append_pair("alt", "media");
+    let request = http_client.get(api_url).bearer_auth(&session.access_token);
+    let response = get_text_body!(request, serde_json::Value)?;
+
+    Ok(response)
 }

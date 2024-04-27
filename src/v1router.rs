@@ -1,5 +1,6 @@
 use crate::google::{
-    create_session, generate_auth_url_and_code_verifier, get_user_email, revoke_session,
+    create_session, generate_auth_url_and_code_verifier, get_and_update_db_file,
+    get_db_file_contents, get_user_email, revoke_session,
 };
 use crate::macros::{add_session_cookie, serde_struct};
 use crate::session::{remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession};
@@ -90,7 +91,7 @@ async fn logout(
 ) -> ApiResult<()> {
     revoke_session(http_client, &session).await?;
 
-            remove_session_cookie(jar);
+    remove_session_cookie(jar);
 
     Ok(())
 }
@@ -119,8 +120,8 @@ async fn user_info(
             let email = get_user_email(http_client, &session).await?;
 
             Ok(Json(UserInfoResBody {
-                    logged_in: true,
-                    email: Some(email),
+                logged_in: true,
+                email: Some(email),
             }))
         }
         None => Ok(Json(UserInfoResBody {
@@ -130,6 +131,60 @@ async fn user_info(
     }
 }
 
+/*
+--- /v1/updateMedia ---
+
+Request query: <empty>
+
+Request body: {
+    media: String
+}
+
+Response body: <empty>
+*/
+serde_struct!(UpdateMediaReqBody, media: String);
+
+#[post("/updateMedia", format = "json", data = "<req_body>")]
+async fn update_media(
+    session: LoggedInSession,
+    http_client: &State<reqwest::Client>,
+    req_body: Json<UpdateMediaReqBody>,
+) -> ApiResult<()> {
+    get_and_update_db_file(http_client, &session, &req_body.media).await?;
+
+    Ok(())
+}
+
+/*
+--- /v1/getMedia ---
+
+Request query: <empty>
+
+Request body: <empty>
+
+Response body: {
+    media: String
+}
+*/
+serde_struct!(GetMediaResBody, media: String);
+
+#[get("/getMedia")]
+async fn get_media(
+    session: LoggedInSession,
+    http_client: &State<reqwest::Client>,
+) -> ApiResult<Json<GetMediaResBody>> {
+    let media = get_db_file_contents(http_client, &session).await?;
+
+    Ok(Json(GetMediaResBody { media }))
+}
+
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![google_login, finish_login, logout, user_info]
+    rocket::routes![
+        google_login,
+        finish_login,
+        logout,
+        user_info,
+        update_media,
+        get_media,
+    ]
 }

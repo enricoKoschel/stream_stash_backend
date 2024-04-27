@@ -1,9 +1,9 @@
 macro_rules! serde_struct {
-    ($struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+ $(,)?) => {
+    ($vis:vis $struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+ $(,)?) => {
         #[allow(non_snake_case)]
-        #[derive(serde::Deserialize, serde::Serialize, Debug)]
+        #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
         #[serde(default)]
-        struct $struct_name {
+        $vis struct $struct_name {
             $(
                 $field_name: $field_type,
             )+
@@ -19,10 +19,10 @@ macro_rules! serde_struct {
             }
         }
     };
-    ($struct_name:ident, $($field_name:ident: $field_type:ty),+ $(,)?) => {
+    ($vis:vis $struct_name:ident, $($field_name:ident: $field_type:ty),+ $(,)?) => {
         #[allow(non_snake_case)]
-        #[derive(serde::Deserialize, serde::Serialize, Debug)]
-        struct $struct_name {
+        #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+        $vis struct $struct_name {
             $(
                 $field_name: $field_type,
             )+
@@ -49,8 +49,8 @@ macro_rules! internal_server_error {
 }
 
 macro_rules! parse_url {
-    ($url:literal) => {
-        url::Url::parse($url)
+    ($url:expr) => {
+        url::Url::parse(&$url)
             .map_err(|err| crate::macros::internal_server_error!("URL Parse Error: {}", err))
     };
 }
@@ -79,6 +79,26 @@ macro_rules! get_json_body {
             };
 
             Ok(serde_json::from_value::<$ty>(json.clone()).map_err(|_| json))
+        }
+    };
+}
+
+macro_rules! get_text_body {
+    ($req:expr, $ty:ty) => {
+        'block: {
+            let response = match $req.send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    break 'block Err(crate::macros::internal_server_error!(
+                        "Reqwest error: {}",
+                        err
+                    ))
+                }
+            };
+
+            response.text().await.map_err(|err| {
+                crate::macros::internal_server_error!("Text deserialize error: {}", err)
+            })
         }
     };
 }
@@ -118,6 +138,6 @@ macro_rules! compare_scope {
 }
 
 pub(crate) use {
-    add_session_cookie, compare_scope, error_context, forbidden, get_json_body,
+    add_session_cookie, compare_scope, error_context, forbidden, get_json_body, get_text_body,
     internal_server_error, log_error_location, parse_url, serde_struct,
 };
