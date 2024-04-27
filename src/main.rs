@@ -2,6 +2,7 @@ mod frontend;
 mod google;
 mod macros;
 mod session;
+mod tmdb;
 mod v1router;
 
 use google::ApplicationDetails;
@@ -9,6 +10,7 @@ use rocket::launch;
 use rocket::{fairing::Fairing, time::OffsetDateTime};
 use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins, CorsOptions};
 use std::time::Duration;
+use tmdb::ReadAccessToken;
 
 #[derive(Debug)]
 struct ErrorContext {
@@ -94,9 +96,13 @@ fn rocket() -> _ {
             .expect("Please provide a GOOGLE_CLIENT_SECRET envvar"),
     };
 
+    let tmdb_read_access_token = std::env::var("TMDB_READ_ACCESS_TOKEN")
+        .expect("Please provide a TMDB_READ_ACCESS_TOKEN envvar");
+
     rocket::build()
         .attach(cors_fairing())
         .manage(google_application_details)
         .manage(reqwest::Client::new())
+        .manage(ReadAccessToken(tmdb_read_access_token))
         .mount("/v1", v1router::routes())
 }

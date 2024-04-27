@@ -1,3 +1,4 @@
+// TODO: Remove?
 macro_rules! serde_struct {
     ($vis:vis $struct_name:ident, $($field_name:ident: $field_type:ty = $field_default:expr),+ $(,)?) => {
         #[allow(non_snake_case)]

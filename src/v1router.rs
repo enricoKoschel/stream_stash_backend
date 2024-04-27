@@ -4,6 +4,7 @@ use crate::google::{
 };
 use crate::macros::{add_session_cookie, serde_struct};
 use crate::session::{remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession};
+use crate::tmdb::{self, MovieSearchResult, ReadAccessToken, TvSearchResult};
 use crate::{ApiResult, ApplicationDetails};
 use rocket::http::CookieJar;
 use rocket::serde::json::Json;
@@ -178,6 +179,66 @@ async fn get_media(
     Ok(Json(GetMediaResBody { media }))
 }
 
+serde_struct!(SearchReqBody, query: String, page: u32);
+
+/*
+--- /v1/movieSearch ---
+
+Request query: <empty>
+
+Request body: {
+    query: String,
+    page: u32,
+}
+
+Response body: <empty>
+*/
+#[get("/movieSearch", format = "json", data = "<req_body>")]
+async fn movie_search(
+    http_client: &State<reqwest::Client>,
+    tmdb_read_access_token: &State<ReadAccessToken>,
+    req_body: Json<SearchReqBody>,
+) -> ApiResult<Json<MovieSearchResult>> {
+    let result = tmdb::movie_search(
+        tmdb_read_access_token,
+        http_client,
+        &req_body.query,
+        req_body.page,
+    )
+    .await?;
+
+    Ok(Json(result))
+}
+
+/*
+--- /v1/tvSearch ---
+
+Request query: <empty>
+
+Request body: {
+    query: String,
+    page: u32,
+}
+
+Response body: <empty>
+*/
+#[get("/tvSearch", format = "json", data = "<req_body>")]
+async fn tv_search(
+    http_client: &State<reqwest::Client>,
+    tmdb_read_access_token: &State<ReadAccessToken>,
+    req_body: Json<SearchReqBody>,
+) -> ApiResult<Json<TvSearchResult>> {
+    let result = tmdb::tv_search(
+        tmdb_read_access_token,
+        http_client,
+        &req_body.query,
+        req_body.page,
+    )
+    .await?;
+
+    Ok(Json(result))
+}
+
 pub fn routes() -> Vec<rocket::Route> {
     rocket::routes![
         google_login,
@@ -186,5 +247,7 @@ pub fn routes() -> Vec<rocket::Route> {
         user_info,
         update_media,
         get_media,
+        movie_search,
+        tv_search,
     ]
 }
