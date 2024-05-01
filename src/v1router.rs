@@ -4,7 +4,7 @@ use crate::google::{
 };
 use crate::macros::{add_session_cookie, serde_struct};
 use crate::session::{remove_session_cookie, LoggedInSession, Session, TempCodeVerifierSession};
-use crate::tmdb::{self, MovieSearchResult, ReadAccessToken, TvSearchResult};
+use crate::tmdb::{self, ReadAccessToken, SearchResult};
 use crate::{ApiResult, ApplicationDetails};
 use rocket::http::CookieJar;
 use rocket::serde::json::Json;
@@ -179,33 +179,33 @@ async fn get_media(
     Ok(Json(GetMediaResBody { media }))
 }
 
-serde_struct!(SearchReqBody, query: String, page: u32);
+serde_struct!(SearchReqQuery, query: String, page: u32);
 
 /*
 --- /v1/movieSearch ---
 
-Request query: <empty>
-
-Request body: {
+Request query: {
     query: String,
     page: u32,
 }
 
-Response body: <empty>
+Request body: <empty
+
+Response body: {
+    page: u32,
+    results: Vec<Media>,
+    total_pages: u32,
+    total_results: u32,
+}
 */
-#[get("/movieSearch", format = "json", data = "<req_body>")]
+#[get("/movieSearch?<query>&<page>")]
 async fn movie_search(
     http_client: &State<reqwest::Client>,
     tmdb_read_access_token: &State<ReadAccessToken>,
-    req_body: Json<SearchReqBody>,
-) -> ApiResult<Json<MovieSearchResult>> {
-    let result = tmdb::movie_search(
-        tmdb_read_access_token,
-        http_client,
-        &req_body.query,
-        req_body.page,
-    )
-    .await?;
+    query: &str,
+    page: u32,
+) -> ApiResult<Json<SearchResult>> {
+    let result = tmdb::movie_search(tmdb_read_access_token, http_client, query, page).await?;
 
     Ok(Json(result))
 }
@@ -213,28 +213,28 @@ async fn movie_search(
 /*
 --- /v1/tvSearch ---
 
-Request query: <empty>
-
-Request body: {
+Request query: {
     query: String,
     page: u32,
 }
 
-Response body: <empty>
+Request body: <empty>
+
+Response body: {
+    page: u32,
+    results: Vec<Media>,
+    total_pages: u32,
+    total_results: u32,
+}
 */
-#[get("/tvSearch", format = "json", data = "<req_body>")]
+#[get("/tvSearch?<query>&<page>")]
 async fn tv_search(
     http_client: &State<reqwest::Client>,
     tmdb_read_access_token: &State<ReadAccessToken>,
-    req_body: Json<SearchReqBody>,
-) -> ApiResult<Json<TvSearchResult>> {
-    let result = tmdb::tv_search(
-        tmdb_read_access_token,
-        http_client,
-        &req_body.query,
-        req_body.page,
-    )
-    .await?;
+    query: &str,
+    page: u32,
+) -> ApiResult<Json<SearchResult>> {
+    let result = tmdb::tv_search(tmdb_read_access_token, http_client, query, page).await?;
 
     Ok(Json(result))
 }
