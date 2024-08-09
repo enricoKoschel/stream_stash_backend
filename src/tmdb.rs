@@ -41,7 +41,7 @@ pub async fn movie_search(
         overview: String,
         poster_path: Option<String>,
         title: String,
-        release_date: String,
+        release_date: Option<String>,
     );
     serde_struct!(Response, page: u32, results: Vec<Movie>, total_pages: u32, total_results: u32);
 
@@ -75,7 +75,9 @@ pub async fn movie_search(
                     overview: movie.overview,
                     poster_url: map_path(&movie.poster_path, POSTER_BASE_URL),
                     title: movie.title,
-                    date: movie.release_date,
+                    date: movie
+                        .release_date
+                        .unwrap_or_else(|| "????-??-??".to_string()),
                 })
                 .collect::<Vec<_>>();
 
