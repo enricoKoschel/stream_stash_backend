@@ -79,7 +79,7 @@ macro_rules! get_json_body {
                 }
             };
 
-            Ok(serde_json::from_value::<$ty>(json.clone()).map_err(|_| json))
+            Ok(serde_json::from_value::<$ty>(json.clone()).map_err(|err| (err, json)))
         }
     };
 }

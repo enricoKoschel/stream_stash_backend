@@ -88,7 +88,11 @@ pub async fn movie_search(
                 total_results,
             })
         }
-        Err(err) => Err(internal_server_error!("Could not movie search TMDB: {err}")),
+        Err(err) => Err(internal_server_error!(
+            "Could not movie search TMDB: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }
 
@@ -151,6 +155,10 @@ pub async fn tv_search(
                 total_results,
             })
         }
-        Err(err) => Err(internal_server_error!("Could not tv search TMDB: {err}")),
+        Err(err) => Err(internal_server_error!(
+            "Could not tv search TMDB: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }

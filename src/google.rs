@@ -104,7 +104,11 @@ pub async fn create_session(
                 expires_at: expires_at(expires_in),
             })
         }
-        Err(err) => Err(forbidden!("Could not authenticate with Google: {err}")),
+        Err(err) => Err(forbidden!(
+            "Could not authenticate with Google: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }
 
@@ -148,7 +152,9 @@ pub async fn get_user_email(
             verified_email: _,
         }) => Ok(email),
         Err(err) => Err(forbidden!(
-            "Could not get user information from Google: {err}"
+            "Could not get user information from Google: {} - {}",
+            err.0,
+            err.1
         )),
     }
 }
@@ -199,7 +205,11 @@ pub async fn create_refreshed_session(
 
             Ok(refreshed_session)
         }
-        Err(err) => Err(forbidden!("Could not reauthenticate with Google: {err}")),
+        Err(err) => Err(forbidden!(
+            "Could not reauthenticate with Google: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }
 
@@ -232,7 +242,11 @@ async fn create_db_file(
 
             Ok(file)
         }
-        Err(err) => Err(forbidden!("Could not create file in Google Drive: {err}")),
+        Err(err) => Err(forbidden!(
+            "Could not create file in Google Drive: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }
 
@@ -263,7 +277,11 @@ async fn get_db_file(http_client: &reqwest::Client, session: &LoggedInSession) -
         } else {
             files[0].clone()
         }),
-        Err(err) => Err(forbidden!("Could not list files in Google Drive: {err}")),
+        Err(err) => Err(forbidden!(
+            "Could not list files in Google Drive: {} - {}",
+            err.0,
+            err.1
+        )),
     }
 }
 
