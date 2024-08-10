@@ -27,6 +27,13 @@ fn map_path(path: &Option<String>, base_url: &str) -> Option<String> {
     path.as_ref().map(|path| format!("{base_url}{path}"))
 }
 
+fn map_release_date(date: Option<String>) -> String {
+    match date {
+        Some(date) if !date.is_empty() => date,
+        _ => "????-??-??".to_string(),
+    }
+}
+
 pub async fn movie_search(
     tmdb_read_access_token: &ReadAccessToken,
     http_client: &reqwest::Client,
@@ -75,9 +82,7 @@ pub async fn movie_search(
                     overview: movie.overview,
                     poster_url: map_path(&movie.poster_path, POSTER_BASE_URL),
                     title: movie.title,
-                    date: movie
-                        .release_date
-                        .unwrap_or_else(|| "????-??-??".to_string()),
+                    date: map_release_date(movie.release_date),
                 })
                 .collect::<Vec<_>>();
 
@@ -110,7 +115,7 @@ pub async fn tv_search(
         overview: String,
         poster_path: Option<String>,
         name: String,
-        first_air_date: String,
+        first_air_date: Option<String>,
     );
     serde_struct!(Response, page: u32, results: Vec<Tv>, total_pages: u32, total_results: u32);
 
@@ -144,7 +149,7 @@ pub async fn tv_search(
                     overview: tv.overview,
                     poster_url: map_path(&tv.poster_path, POSTER_BASE_URL),
                     title: tv.name,
-                    date: tv.first_air_date,
+                    date: map_release_date(tv.first_air_date),
                 })
                 .collect::<Vec<_>>();
 
