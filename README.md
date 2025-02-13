@@ -17,21 +17,20 @@ Click [here](https://developer.themoviedb.org/docs/getting-started) for instruct
 
 ### Setup environment variables
 
-- Set the `ROCKET_SECRET_KEY` environment variable with a random 256-bit base64 string.\
-  This can be done with openssl like so:
+- Create a `.env` file in the same directory as the `Cargo.toml` file with the following contents:
 
-```bash
-openssl rand -base64 32
+```toml
+ROCKET_SECRET_KEY="" # A random 256-bit base64 string
+ROCKET_ADDRESS="" # The address you want the backend to listen on
+ROCKET_PORT="" # The port you want the backend to listen on
+GOOGLE_CLIENT_ID="" # Your Google Cloud application's Client ID
+GOOGLE_CLIENT_SECRET="" # Your Google Cloud application's Client Secret
+TMDB_READ_ACCESS_TOKEN="" # Your TMDB API Read Access Token
 ```
 
-- Set the `ROCKET_ADDRESS` environment variable to the address you want the backend to listen on\
-  (recommended for use with frontend: `127.0.0.1`)
-- Set the `ROCKET_PORT` environment variable to the port you want the backend to listen on\
-  (recommended for use with frontend: `8080`)
-- Set the `GOOGLE_CLIENT_ID` environment variable with your Google Cloud application's client id
-- Set the `GOOGLE_CLIENT_SECRET` environment variable with your Google Cloud application's client secret
-- Set the `TMDB_READ_ACCESS_TOKEN` environment variable with your TMDB API read access token
-  - Make sure to use the API read access token, not the API key (both can be found [here](https://www.themoviedb.org/settings/api) after your request to access the TMDB API has been granted)
+- You can create the `ROCKET_SECRET_KEY` with OpenSSL like so: `openssl rand -base64 32`
+- The recommended address and port for use with the Stream Stash frontend are `127.0.0.1:8080`
+- Make sure to use the TMDB API Read Access Token, not the API Key (both can be found [here](https://www.themoviedb.org/settings/api) after your request to access the TMDB API has been granted)
 
 ### Build and run the app
 

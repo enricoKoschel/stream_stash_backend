@@ -16,3 +16,4 @@ pkce = "0.2.0"
 const_format = "0.2.32"
 reqwest = { version = "0.12.2", features = ["json"] }
 url = "2.5.0"
+dotenv = "0.15.0"

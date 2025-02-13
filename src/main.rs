@@ -89,15 +89,21 @@ fn rocket() -> _ {
         .filter_level(log::LevelFilter::Info) // TODO: Put in envvar locally and on server
         .init();
 
+    if let Err(e) = dotenv::dotenv() {
+        if !e.not_found() {
+            panic!("Error while loading .env file: {e}")
+        }
+    }
+
     let google_application_details = ApplicationDetails {
         client_id: std::env::var("GOOGLE_CLIENT_ID")
-            .expect("Please provide a GOOGLE_CLIENT_ID envvar"),
+            .expect("Please provide a GOOGLE_CLIENT_ID environment variable"),
         client_secret: std::env::var("GOOGLE_CLIENT_SECRET")
-            .expect("Please provide a GOOGLE_CLIENT_SECRET envvar"),
+            .expect("Please provide a GOOGLE_CLIENT_SECRET environment variable"),
     };
 
     let tmdb_read_access_token = std::env::var("TMDB_READ_ACCESS_TOKEN")
-        .expect("Please provide a TMDB_READ_ACCESS_TOKEN envvar");
+        .expect("Please provide a TMDB_READ_ACCESS_TOKEN environment variable");
 
     rocket::build()
         .attach(cors_fairing())
